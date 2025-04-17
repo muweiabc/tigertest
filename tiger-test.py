@@ -5,6 +5,7 @@ from tigeropen.common.consts import (Language,        # 语言
 from tigeropen.tiger_open_config import TigerOpenClientConfig
 from tigeropen.common.util.signature_utils import read_private_key
 from tigeropen.quote.quote_client import QuoteClient
+import os
 
 # 查询行情的操作通过QuoteClient对象的成员方法实现，所以调用相关行情接口之前需要先初始化QuoteClient，具体代码如下：
 # 首先通过自定义的函数生成配置文件, 函数get_client_config会返回一个包含初始化行情对象所需要的用户信息的ClientConfig对象
@@ -15,8 +16,10 @@ def get_client_config():
     https://quant.itigerup.com/#developer 开发者信息获取
     """
     client_config = TigerOpenClientConfig()
-    # 如果是windowns系统，路径字符串前需加 r 防止转义， 如 read_private_key(r'C:\Users\admin\tiger.pem')
-    client_config.private_key = read_private_key('keys/private.pem')
+    # 使用绝对路径读取私钥文件
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    private_key_path = os.path.join(current_dir, 'keys', 'private.pem')
+    client_config.private_key = read_private_key(private_key_path)
     client_config.tiger_id = '20153826'
     client_config.account = '20240803144534965'
     client_config.language = Language.zh_CN  #可选，不填默认为英语'
