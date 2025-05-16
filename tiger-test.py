@@ -37,11 +37,14 @@ quote_client = QuoteClient(client_config)
 # 对于使用多台设备调用API的用户，需先调用grab_quote_permission进行行情权限的抢占，详情请见基本操作-行情类-通用-grab_quote_permission方法说明
 permissions = quote_client.grab_quote_permission() 
 
+
 #输出list类型的行情权限权限列表
 print(permissions)
 
 # 调用API查询股票行情
-stock_price = quote_client.get_stock_briefs(['00700'])
+# stock_price = quote_client.get_stock_briefs(['00700'])
 
-# 查询行情函数会返回一个包含当前行情快照的pandas.DataFrame对象，见返回示例。具体字段含义参见get_stock_briefs方法说明
-print(stock_price)
+# # 查询行情函数会返回一个包含当前行情快照的pandas.DataFrame对象，见返回示例。具体字段含义参见get_stock_briefs方法说明
+# print(stock_price)
+names = quote_client.get_symbol_names()
+print(names)
