@@ -10,6 +10,7 @@ import time
 import requests
 from requests.exceptions import RequestException
 import logging
+import json
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -17,6 +18,19 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
+
+def format_json_response(response):
+    """格式化API响应为JSON字符串"""
+    try:
+        if isinstance(response, dict):
+            return json.dumps(response, indent=2, ensure_ascii=False)
+        elif hasattr(response, 'data'):
+            return json.dumps(response.data, indent=2, ensure_ascii=False)
+        else:
+            return str(response)
+    except Exception as e:
+        logger.error(f"格式化JSON响应时出错: {str(e)}")
+        return str(response)
 
 class OKXTrading:
     def __init__(self, api_key, secret_key, passphrase, is_simulated=True):
@@ -79,18 +93,60 @@ class OKXTrading:
         
         return self._make_request(self.tradeAPI.place_order, **params)
 
-    def get_account_balance(self):
-        """获取账户余额信息"""
+    def get_account_balance(self, ccy=None):
+        """
+        获取账户余额信息
+        :param ccy: 币种，如 'BTC', 'ETH', 'USDT'，不传则返回所有币种
+        """
         try:
-            return self._make_request(self.accountAPI.get_account_balance)
+            params = {}
+            if ccy:
+                params['ccy'] = ccy
+            return self._make_request(self.accountAPI.get_account_balance, **params)
         except Exception as e:
             logger.error(f"获取账户余额时出错: {str(e)}")
+            return None
+
+    def get_account_positions(self, instType=None, instId=None):
+        """
+        获取账户持仓信息
+        :param instType: 产品类型，可选值：SPOT(现货), MARGIN(杠杆), SWAP(永续合约), FUTURES(交割合约), OPTION(期权)
+        :param ccy: 币种，如 'BTC', 'ETH', 'USDT'，不传则返回所有币种
+        """
+        try:
+            params = {}
+            if instType:
+                params['instType'] = instType
+            if instId:
+                params['instId'] = instId
+            return self._make_request(self.accountAPI.get_positions, **params)
+        except Exception as e:
+            logger.error(f"获取持仓信息时出错: {str(e)}")
+            return None
+
+    def get_account_config(self, instType=None):
+        """
+        获取账户配置信息
+        :param instType: 产品类型，可选值：SPOT(现货), MARGIN(杠杆), SWAP(永续合约), FUTURES(交割合约), OPTION(期权)
+        """
+        try:
+            params = {}
+            if instType:
+                params['instType'] = instType
+            return self._make_request(self.accountAPI.get_account_config, **params)
+        except Exception as e:
+            logger.error(f"获取账户配置时出错: {str(e)}")
             return None
 
     def get_trading_history(self, symbol='ETH-USDT', limit=10):
         """获取交易历史"""
         try:
-            return self._make_request(self.tradeAPI.get_orders_history,  instId=symbol, limit=str(limit))
+            params = {
+                'instType': 'SPOT',
+                'instId': symbol,
+                'limit': str(limit)
+            }
+            return self._make_request(self.tradeAPI.get_orders_history, **params)
         except Exception as e:
             logger.error(f"获取交易历史时出错: {str(e)}")
             return None
@@ -98,7 +154,11 @@ class OKXTrading:
     def get_open_orders(self, symbol='ETH-USDT'):
         """获取当前未完成的订单"""
         try:
-            return self._make_request(self.tradeAPI.get_orders_pending, instId=symbol)
+            params = {
+                'instType': 'SPOT',
+                'instId': symbol
+            }
+            return self._make_request(self.tradeAPI.get_orders_pending, **params)
         except Exception as e:
             logger.error(f"获取未完成订单时出错: {str(e)}")
             return None
@@ -106,7 +166,11 @@ class OKXTrading:
     def get_order_book(self, symbol='ETH-USDT', limit=5):
         """获取订单簿信息"""
         try:
-            return self._make_request(self.marketAPI.get_books, instId=symbol, sz=str(limit))
+            params = {
+                'instId': symbol,
+                'sz': str(limit)
+            }
+            return self._make_request(self.marketAPI.get_books, **params)
         except Exception as e:
             logger.error(f"获取订单簿时出错: {str(e)}")
             return None
@@ -123,42 +187,37 @@ def main():
             return
         
         # 初始化交易类
-        trader = OKXTrading(api_key, secret_key, passphrase, is_simulated=True)
+        trader = OKXTrading(api_key, secret_key, passphrase, is_simulated=False)
         
-        # 获取ETH价格
-        price_info = trader.get_eth_price()
-        logger.info(f"ETH当前价格: {price_info}")
+        # # 获取所有币种余额
+        # logger.info("\n=== 所有币种余额 ===")
+        # all_balance = trader.get_account_balance()
+        # logger.info(format_json_response(all_balance))
         
-        # 获取ETH持仓
-        position_info = trader.get_eth_position()
-        logger.info(f"ETH持仓信息: {position_info}")
+        # # 获取USDT余额
+        # logger.info("\n=== USDT余额 ===")
+        # usdt_balance = trader.get_account_balance(ccy='USDT')
+        # logger.info(format_json_response(usdt_balance))
         
-        # 获取账户余额
-        logger.info("\n=== 账户余额 ===")
-        balance = trader.get_account_balance()
-        if balance:
-            logger.info(balance)
-
-        # 获取交易历史
-        logger.info("\n=== 最近交易历史 ===")
-        trades = trader.get_trading_history()
-        if trades is not None:
-            logger.info(trades)
-
-        # 获取未完成订单
-        logger.info("\n=== 未完成订单 ===")
-        open_orders = trader.get_open_orders()
-        if open_orders is not None:
-            logger.info(open_orders)
-
-        # 获取订单簿
-        logger.info("\n=== 订单簿信息 ===")
-        order_book = trader.get_order_book()
-        if order_book:
-            logger.info("\n买单:")
-            logger.info(order_book['bids'])
-            logger.info("\n卖单:")
-            logger.info(order_book['asks'])
+        # # 获取账户配置
+        # logger.info("\n=== 账户配置 ===")
+        # account_config = trader.get_account_config()
+        # logger.info(format_json_response(account_config))
+        
+        # # 获取所有持仓
+        # logger.info("\n=== 所有持仓 ===")
+        # all_positions = trader.get_account_positions()
+        # logger.info(format_json_response(all_positions))
+        
+        # 获取现货持仓
+        logger.info("\n=== 现货持仓 ===")
+        spot_positions = trader.get_account_positions(instType='SPOT')
+        logger.info(format_json_response(spot_positions))
+        
+        # 获取ETH现货持仓
+        logger.info("\n=== ETH现货持仓 ===")
+        eth_positions = trader.get_account_positions(instType='SPOT')
+        logger.info(format_json_response(eth_positions))
 
     except Exception as e:
         logger.error(f"程序执行出错: {str(e)}")
