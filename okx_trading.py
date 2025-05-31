@@ -19,6 +19,28 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
+def get_api_credentials(is_simulated=True):
+    """
+    从环境变量获取API凭证
+    :param is_simulated: 是否为模拟交易
+    :return: (api_key, secret_key, passphrase)
+    """
+    if is_simulated:
+        api_key = os.getenv('OKX_SIM_apikey')
+        secret_key = os.getenv('OKX_SIM_secretkey')
+        passphrase = os.getenv('OKX_SIM_PASSPHRASE')
+        logger.info("使用模拟交易API凭证")
+    else:
+        api_key = os.getenv('OKX_API_KEY')
+        secret_key = os.getenv('OKX_SECRET_KEY')
+        passphrase = os.getenv('OKX_PASSPHRASE')
+        logger.info("使用真实交易API凭证")
+    
+    if not all([api_key, secret_key, passphrase]):
+        raise ValueError("请在.env文件中设置正确的API凭证信息")
+    
+    return api_key, secret_key, passphrase
+
 def format_json_response(response):
     """格式化API响应为JSON字符串"""
     try:
@@ -33,10 +55,17 @@ def format_json_response(response):
         return str(response)
 
 class OKXTrading:
-    def __init__(self, api_key, secret_key, passphrase, is_simulated=True):
+    def __init__(self, is_simulated=True):
+        """
+        初始化OKX交易类
+        :param is_simulated: 是否为模拟交易
+        """
         self.flag = "1" if is_simulated else "0"  # 1: 模拟盘, 0: 实盘
         self.max_retries = 3
         self.retry_delay = 2  # 重试延迟秒数
+        
+        # 获取API凭证
+        api_key, secret_key, passphrase = get_api_credentials(is_simulated)
         
         # 配置API客户端
         self.accountAPI = Account.AccountAPI(api_key, secret_key, passphrase, False, self.flag)
@@ -94,6 +123,7 @@ class OKXTrading:
         return self._make_request(self.tradeAPI.place_order, **params)
 
     def get_account_balance(self, ccy=None):
+        logger.info("获取账户余额信息")
         """
         获取账户余额信息
         :param ccy: 币种，如 'BTC', 'ETH', 'USDT'，不传则返回所有币种
@@ -102,7 +132,23 @@ class OKXTrading:
             params = {}
             if ccy:
                 params['ccy'] = ccy
-            return self._make_request(self.accountAPI.get_account_balance, **params)
+            balance_response = self._make_request(self.accountAPI.get_account_balance, **params)
+            if balance_response and 'data' in balance_response and balance_response['data']:
+                account_data = balance_response['data'][0]
+                logger.info(f"账户总权益: {account_data['totalEq']} USDT")
+                logger.info(f"账户可用余额: {account_data['availEq']} USDT")
+            
+                # 显示各个币种的余额
+                logger.info("\n各币种余额详情:")
+                for balance in account_data['details']:
+                    ccy = balance['ccy']
+                    eq = balance['eq']
+                    avail_eq = balance['availEq']
+                    if float(eq) > 0 or float(avail_eq) > 0:  # 只显示有余额的币种
+                        logger.info(f"{ccy}:")
+                        logger.info(f"  总余额: {eq} {ccy}")
+                        logger.info(f"  可用余额: {avail_eq} {ccy}")
+            return balance_response
         except Exception as e:
             logger.error(f"获取账户余额时出错: {str(e)}")
             return None
@@ -111,7 +157,6 @@ class OKXTrading:
         """
         获取账户持仓信息
         :param instType: 产品类型，可选值：SPOT(现货), MARGIN(杠杆), SWAP(永续合约), FUTURES(交割合约), OPTION(期权)
-        :param ccy: 币种，如 'BTC', 'ETH', 'USDT'，不传则返回所有币种
         """
         try:
             params = {}
@@ -153,15 +198,36 @@ class OKXTrading:
 
     def get_open_orders(self, symbol='ETH-USDT'):
         """获取当前未完成的订单"""
-        try:
-            params = {
-                'instType': 'SPOT',
-                'instId': symbol
+        params = {
+            'instType': 'SPOT',
+            'instId': symbol
+        }
+        orders = self._make_request(self.tradeAPI.get_order_list, **params)
+        order_list = []
+        for order in orders['data']:
+            order_info = {
+                '订单ID': order['ordId'],
+                '交易对': order['instId'],
+                '方向': '买入' if order['side'] == 'buy' else '卖出',
+                '价格': order['px'],
+                '数量': order['sz'],
+                '状态': order['state'],
+                '创建时间': order['cTime']
             }
-            return self._make_request(self.tradeAPI.get_orders_pending, **params)
-        except Exception as e:
-            logger.error(f"获取未完成订单时出错: {str(e)}")
-            return None
+            order_list.append(order_info)
+            logger.info(f"订单信息: {order_info}")
+        return orders
+    
+    def cancel_all_orders(self):
+        """取消所有未完成的订单"""
+        open_orders = self.get_open_orders()
+        if open_orders and 'data' in open_orders and open_orders['data']:
+            for order in open_orders['data']:
+                self.tradeAPI.cancel_order(
+                    instId=order['instId'],
+                    ordId=order['ordId']
+                )
+        logger.info("已取消所有未完成订单")
 
     def get_order_book(self, symbol='ETH-USDT', limit=5):
         """获取订单簿信息"""
@@ -187,7 +253,7 @@ def main():
             return
         
         # 初始化交易类
-        trader = OKXTrading(api_key, secret_key, passphrase, is_simulated=False)
+        trader = OKXTrading(is_simulated=False)
         
         # # 获取所有币种余额
         # logger.info("\n=== 所有币种余额 ===")
@@ -211,12 +277,12 @@ def main():
         
         # 获取现货持仓
         logger.info("\n=== 现货持仓 ===")
-        spot_positions = trader.get_account_positions(instType='SPOT')
+        spot_positions = trader.get_account_positions(instType='SWAP', instId='ETH-USDT-SWAP')
         logger.info(format_json_response(spot_positions))
         
         # 获取ETH现货持仓
         logger.info("\n=== ETH现货持仓 ===")
-        eth_positions = trader.get_account_positions(instType='SPOT')
+        eth_positions = trader.get_account_positions(instType='SWAP', instId='ETH-USDT-SWAP')
         logger.info(format_json_response(eth_positions))
 
     except Exception as e:
